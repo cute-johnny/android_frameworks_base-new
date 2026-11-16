@@ -56,6 +56,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.runBlocking
 
 class NoteTaskQuickAffordanceConfig
 @Inject
@@ -175,7 +176,7 @@ constructor(
         isEnabled &&
             noteTaskInfoResolver.resolveInfo(
                 QUICK_AFFORDANCE,
-                user = controller.getUserForHandlingNotesTaking(QUICK_AFFORDANCE),
+                user = runBlocking { userResolver.getUserForHandlingNoteTaking(QUICK_AFFORDANCE) },
             ) != null
 }
 
