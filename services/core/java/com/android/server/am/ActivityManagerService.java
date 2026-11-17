@@ -9715,6 +9715,7 @@ public class ActivityManagerService extends IActivityManager.Stub
             mProcessList.onSystemReady();
             mAppRestrictionController.onSystemReady();
             mMemoryLimiter.onSystemReady();
+            new AppPreloader(mContext).onSystemReady();
             mSystemReady = true;
             t.traceEnd();
         }
