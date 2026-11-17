@@ -336,6 +336,9 @@ public abstract class OomAdjuster {
      */
     int mNumCachedHiddenProcs = 0;
 
+    /** Usage-aware cached app protection (RisingOS mondrian). */
+    final FrequentAppTracker mFrequentApps = new FrequentAppTracker();
+
     /** Track all uids that have actively running processes. */
     @CompositeRWLock({"mServiceLock", "mProcLock"})
     ActiveUidsInternal mActiveUids;
@@ -1241,6 +1244,11 @@ public abstract class OomAdjuster {
         int lastCachedGroupImportance = 0;
         int lastCachedGroupUid = 0;
 
+        // RisingOS mondrian: the main processes of the most frequently used apps get
+        // CACHED_APP_MIN_ADJ exclusively; every other cached process is kept above it, so lmkd
+        // (which kills from the highest adj down) reaches them last.
+        final boolean protectFrequent = mFrequentApps.isActive();
+
         for (int i = numLru - 1; i >= 0; i--) {
             final ProcessRecordInternal app = lruList.get(i);
             final @OomAdjust int curAdj = app.getCurAdj();
@@ -1253,6 +1261,12 @@ public abstract class OomAdjuster {
             } else if (!app.isKilledByAm() && app.isProcessRunning() && curAdj >= UNKNOWN_ADJ) {
                 // If we haven't yet assigned the final cached adj to the process, do that now.
                 final ProcessServiceRecordInternal psr = app.getServices();
+                if (protectFrequent && mFrequentApps.isProtected(app)) {
+                    app.setCurRawAdj(CACHED_APP_MIN_ADJ);
+                    app.setCurAdj(applyBindAboveClientToAdj(psr.hasBindAboveClient(),
+                            CACHED_APP_MIN_ADJ));
+                    continue;
+                }
                 switch (app.getCurProcState()) {
                     case PROCESS_STATE_LAST_ACTIVITY:
                     case PROCESS_STATE_CACHED_ACTIVITY:
@@ -1296,7 +1310,10 @@ public abstract class OomAdjuster {
                         // This process is a cached process holding activities...
                         // assign it the next cached value for that type, and then
                         // step that cached level.
-                        final int rawAdj = curCachedAdj + curCachedImpAdj;
+                        int rawAdj = curCachedAdj + curCachedImpAdj;
+                        if (protectFrequent && rawAdj <= CACHED_APP_MIN_ADJ) {
+                            rawAdj = CACHED_APP_MIN_ADJ + 1;
+                        }
                         app.setCurRawAdj(rawAdj);
                         app.setCurAdj(
                                 applyBindAboveClientToAdj(psr.hasBindAboveClient(), rawAdj));
@@ -2623,6 +2640,7 @@ public abstract class OomAdjuster {
         if (state.getSetProcState() <= PROCESS_STATE_TOP
                 && state.getCurProcState() > PROCESS_STATE_TOP) {
             state.setLastTopTime(nowUptime);
+            mFrequentApps.noteLeftTop(state);
         }
     }
 
