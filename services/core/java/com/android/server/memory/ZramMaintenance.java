@@ -25,6 +25,7 @@ import android.content.Context;
 import android.os.IBinder;
 import android.os.IMmd;
 import android.os.PersistableBundle;
+import android.os.PowerManager;
 import android.os.RemoteException;
 import android.os.ServiceManager;
 import android.os.SystemProperties;
@@ -69,7 +70,7 @@ public class ZramMaintenance extends JobService {
     private static final String REQUIRE_DEVICE_IDLE_PROP =
             "zram.maintenance.require_device_idle";
     private static final boolean DEFAULT_REQUIRE_DEVICE_IDLE =
-            true;
+            false;
     private static final String REQUIRE_BATTERY_NOT_LOW_PROP =
             "zram.maintenance.require_battery_not_low";
     private static final boolean DEFAULT_REQUIRE_BATTERY_NOT_LOW =
@@ -119,7 +120,13 @@ public class ZramMaintenance extends JobService {
                 // Status check is required before the first doZramMaintenanceAsync() call once.
                 checkStatus = false;
 
-                mmd.doZramMaintenanceAsync();
+                final PowerManager pm = context.getSystemService(PowerManager.class);
+                if (pm != null && (pm.isPowerSaveMode()
+                        || pm.getCurrentThermalStatus() >= PowerManager.THERMAL_STATUS_MODERATE)) {
+                    Slog.i(TAG, "skipping zram maintenance due to power save or thermal status");
+                } else {
+                    mmd.doZramMaintenanceAsync();
+                }
             } catch (RemoteException e) {
                 Slog.e(TAG, "Failed to binder call to mmd", e);
             }

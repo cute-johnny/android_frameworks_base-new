@@ -21,6 +21,7 @@ import android.app.job.JobParameters
 import android.app.job.JobScheduler
 import android.os.IMmd
 import android.os.PersistableBundle
+import android.os.PowerManager
 import android.os.RemoteException
 import android.testing.TestableContext
 import androidx.test.filters.SmallTest
@@ -62,11 +63,17 @@ class ZramMaintenanceTest {
     @Mock
     private lateinit var mockMmd: IMmd
 
+    @Mock
+    private lateinit var mockPowerManager: PowerManager
+
     @Before
     @Throws(RemoteException::class)
     fun setUp() {
         MockitoAnnotations.initMocks(this)
+        `when`(mockPowerManager.isPowerSaveMode).thenReturn(false)
+        `when`(mockPowerManager.currentThermalStatus).thenReturn(PowerManager.THERMAL_STATUS_NONE)
         context.addMockSystemService(JobScheduler::class.java, mockJobScheduler)
+        context.addMockSystemService(PowerManager::class.java, mockPowerManager)
     }
 
     @Test
@@ -77,6 +84,8 @@ class ZramMaintenanceTest {
         val job = jobInfoCaptor.value
         assertThat(job.id).isEqualTo(ZramMaintenance.JOB_ID)
         assertThat(job.extras.getBoolean(ZramMaintenance.KEY_CHECK_STATUS)).isTrue()
+        assertThat(job.isRequireDeviceIdle).isFalse()
+        assertThat(job.isRequireBatteryNotLow).isTrue()
     }
 
     @Test
@@ -150,5 +159,37 @@ class ZramMaintenanceTest {
         val nextJob = jobInfoCaptor.value
         assertThat(nextJob.id).isEqualTo(ZramMaintenance.JOB_ID)
         assertThat(nextJob.extras.getBoolean(ZramMaintenance.KEY_CHECK_STATUS)).isTrue()
+    }
+
+    @Test
+    fun startJobSkipsWhenPowerSaveModeEnabled() {
+        val extras = PersistableBundle()
+        extras.putBoolean(ZramMaintenance.KEY_CHECK_STATUS, false)
+        val params = generateJobParameters(ZramMaintenance.JOB_ID, extras)
+        `when`(mockPowerManager.isPowerSaveMode).thenReturn(true)
+
+        ZramMaintenance.startJob(context, params, mockMmd)
+
+        verify(mockMmd, never()).doZramMaintenanceAsync()
+        verify(mockJobScheduler, times(1)).schedule(jobInfoCaptor.capture())
+        val nextJob = jobInfoCaptor.value
+        assertThat(nextJob.id).isEqualTo(ZramMaintenance.JOB_ID)
+        assertThat(nextJob.extras.getBoolean(ZramMaintenance.KEY_CHECK_STATUS)).isFalse()
+    }
+
+    @Test
+    fun startJobSkipsWhenThermalStatusModerateOrHigher() {
+        val extras = PersistableBundle()
+        extras.putBoolean(ZramMaintenance.KEY_CHECK_STATUS, false)
+        val params = generateJobParameters(ZramMaintenance.JOB_ID, extras)
+        `when`(mockPowerManager.currentThermalStatus).thenReturn(PowerManager.THERMAL_STATUS_MODERATE)
+
+        ZramMaintenance.startJob(context, params, mockMmd)
+
+        verify(mockMmd, never()).doZramMaintenanceAsync()
+        verify(mockJobScheduler, times(1)).schedule(jobInfoCaptor.capture())
+        val nextJob = jobInfoCaptor.value
+        assertThat(nextJob.id).isEqualTo(ZramMaintenance.JOB_ID)
+        assertThat(nextJob.extras.getBoolean(ZramMaintenance.KEY_CHECK_STATUS)).isFalse()
     }
 }
