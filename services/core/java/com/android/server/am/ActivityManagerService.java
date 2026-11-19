@@ -21574,59 +21574,102 @@ public class ActivityManagerService extends IActivityManager.Stub
     }
 
     @Override
-    public void releaseMemory(int minAdj, int maxKillCount, boolean includeUIProcesses, boolean skipCamera) {
-        if (minAdj == 0) return;
+    public void releaseMemory(int minAdj, int maxKillCount, boolean includeUIProcesses,
+            boolean skipCamera) {
+        if (checkCallingPermission(android.Manifest.permission.KILL_BACKGROUND_PROCESSES)
+                != PERMISSION_GRANTED) {
+            throw new SecurityException("Permission Denial: releaseMemory() requires "
+                    + android.Manifest.permission.KILL_BACKGROUND_PROCESSES);
+        }
+        if (minAdj <= 0 || maxKillCount <= 0) {
+            return;
+        }
 
+        final long callingId = Binder.clearCallingIdentity();
         try {
-            ArrayList<ProcessRecord> processList = 
-                (ArrayList<ProcessRecord>) mProcessList.getLruProcessesLOSP().clone();
+            synchronized (mGlobalLock) {
+                final ArrayList<ProcessRecord> lru = mProcessList.getLruProcessesLOSP();
+                final ArrayList<ProcessRecord> toKill = new ArrayList<>();
+                for (int i = lru.size() - 1; i >= 0; i--) {
+                    final ProcessRecord record = lru.get(i);
+                    if (record == null
+                            || record.isPersistent()
+                            || record.isRemoved()
+                            || record.isKilled()
+                            || record.isKilledByAm()
+                            || record.getPid() <= 0
+                            || record.getSetAdj() < minAdj
+                            || (!includeUIProcesses && record.hasActivities())
+                            || (skipCamera && isCameraProcessLocked(record))) {
+                        continue;
+                    }
+                    toKill.add(record);
+                }
 
-            ArrayList<ProcessToKill> toKill = new ArrayList<>();
+                toKill.sort((a, b) -> Integer.compare(b.getSetAdj(), a.getSetAdj()));
 
-            for (ProcessRecord record : processList) {
-                if (record != null && record.getSetAdj() >= minAdj) {
-                    boolean hasUI = record.hasActivities();
-                    if (!hasUI || includeUIProcesses) {
-                        toKill.add(new ProcessToKill(
-                            record.getPid(),
-                            record.getSetAdj(),
-                            record.processName
-                        ));
+                int killedCount = 0;
+                for (int i = 0; i < toKill.size() && killedCount < maxKillCount; i++) {
+                    final ProcessRecord record = toKill.get(i);
+                    if (mProcessList.removeProcessLocked(
+                            record,
+                            false /* callerWillRestart */,
+                            true /* allowRestart */,
+                            ApplicationExitInfo.REASON_USER_REQUESTED,
+                            ApplicationExitInfo.SUBREASON_KILL_BACKGROUND,
+                            "releaseMemory")) {
+                        killedCount++;
                     }
                 }
-            }
-
-            Collections.sort(toKill, new ProcessComparator());
-
-            int killedCount = 0;
-            for (ProcessToKill info : toKill) {
-                Process.killProcess(info.pid);
-                killedCount++;
-
-                if (killedCount >= maxKillCount) {
-                    return;
+                if (killedCount > 0) {
+                    updateOomAdjLocked(OOM_ADJ_REASON_PROCESS_END);
                 }
             }
-
-        } catch (Exception e) {}
-    }
-
-    public class ProcessComparator implements Comparator<ProcessToKill> {
-        @Override
-        public int compare(ProcessToKill p1, ProcessToKill p2) {
-            return Integer.compare(p2.adj, p1.adj);
+        } finally {
+            Binder.restoreCallingIdentity(callingId);
         }
     }
 
-    public static final class ProcessToKill {
-        public int adj;
-        public String name; 
-        public int pid;
-
-        public ProcessToKill(int pid, int adj, String name) {
-            this.pid = pid;
-            this.adj = adj;
-            this.name = name;
+    private static boolean isCameraPackageName(String pkg) {
+        if (pkg == null || pkg.isEmpty()) {
+            return false;
         }
+        final String[] knownCameraPkgs = {
+            "com.android.camera",
+            "com.miui.camera",
+            "org.lineageos.aperture",
+            "org.codeaurora.snapcam",
+            "com.android.camera2",
+        };
+        for (String cam : knownCameraPkgs) {
+            if (pkg.equals(cam) || pkg.startsWith(cam + ":")) {
+                return true;
+            }
+        }
+        final String preloadProp = SystemProperties.get("ro.config.app_preload.component", "");
+        if (!preloadProp.isEmpty()) {
+            final ComponentName cn = ComponentName.unflattenFromString(preloadProp);
+            if (cn != null) {
+                final String preloadPkg = cn.getPackageName();
+                if (preloadPkg.toLowerCase(java.util.Locale.ROOT).contains("camera")
+                        && (pkg.equals(preloadPkg) || pkg.startsWith(preloadPkg + ":"))) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean isCameraProcessLocked(ProcessRecord record) {
+        if (isCameraPackageName(record.processName)) {
+            return true;
+        }
+        if (record.info != null && isCameraPackageName(record.info.packageName)) {
+            return true;
+        }
+        final PackageList pkgList = record.getPkgList();
+        return pkgList != null
+                && pkgList.searchEachPackage(
+                        pkg -> isCameraPackageName(pkg) ? Boolean.TRUE : null) != null;
     }
 }

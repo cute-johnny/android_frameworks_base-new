@@ -78,16 +78,17 @@ public class ArcaneIdleManager {
         String TAG_SUBCLASS = "executeManager ";
         RunningServices = localActivityManager.getRunningAppProcesses();
 
-        if (IDLE_TIME_NEEDED > msTillAlarm(imContext) && msTillAlarm(imContext) != 0) {
+        final long tillAlarm = msTillAlarm(imContext);
+        if (tillAlarm > 0 && IDLE_TIME_NEEDED > tillAlarm) {
             IdleManLog(TAG_SUBCLASS + LOG_MSGS[1]);
-            h.postDelayed(rStateTwo,100);
+            h.postDelayed(rStateTwo, 100);
         } else {
             IdleManLog(TAG_SUBCLASS + LOG_MSGS[2]);
-            h.postDelayed(rStateTwo,IDLE_TIME_NEEDED /*1hr*/);
+            h.postDelayed(rStateTwo, IDLE_TIME_NEEDED /*1hr*/);
         }
-        if (msTillAlarm(imContext) != 0) {
+        if (tillAlarm > 0) {
             IdleManLog(TAG_SUBCLASS + LOG_MSGS[3]);
-            h.postDelayed(rStateThree,(msTillAlarm(imContext) - 900000));
+            h.postDelayed(rStateThree, Math.max(0L, tillAlarm - 900000));
         }
     }
 
