@@ -34,6 +34,7 @@ import android.annotation.NonNull;
 import android.annotation.RequiresNoPermission;
 import android.annotation.SuppressLint;
 import android.app.ActivityManager.ProcessState;
+import android.app.ActivityManagerInternal;
 import android.app.AlarmManager;
 import android.app.StatsManager;
 import android.app.usage.NetworkStatsManager;
@@ -2237,6 +2238,11 @@ public final class BatteryStatsService extends IBatteryStats.Stub
                 }
             });
         }
+        final ActivityManagerInternal amInternal =
+                LocalServices.getService(ActivityManagerInternal.class);
+        if (amInternal != null) {
+            amInternal.noteCameraStateChanged(uid, true);
+        }
         if (DBG) Slog.d(TAG, "end noteStartCamera");
         FrameworkStatsLog.write_non_chained(FrameworkStatsLog.CAMERA_STATE_CHANGED, uid,
                 null, FrameworkStatsLog.CAMERA_STATE_CHANGED__STATE__ON);
@@ -2256,6 +2262,11 @@ public final class BatteryStatsService extends IBatteryStats.Stub
                 }
             });
         }
+        final ActivityManagerInternal amInternal =
+                LocalServices.getService(ActivityManagerInternal.class);
+        if (amInternal != null) {
+            amInternal.noteCameraStateChanged(uid, false);
+        }
         FrameworkStatsLog.write_non_chained(FrameworkStatsLog.CAMERA_STATE_CHANGED, uid,
                 null, FrameworkStatsLog.CAMERA_STATE_CHANGED__STATE__OFF);
     }
@@ -2273,6 +2284,11 @@ public final class BatteryStatsService extends IBatteryStats.Stub
                     mStats.noteResetCameraLocked(elapsedRealtime, uptime);
                 }
             });
+        }
+        final ActivityManagerInternal amInternal =
+                LocalServices.getService(ActivityManagerInternal.class);
+        if (amInternal != null) {
+            amInternal.noteCameraReset();
         }
         FrameworkStatsLog.write_non_chained(FrameworkStatsLog.CAMERA_STATE_CHANGED, -1,
                 null, FrameworkStatsLog.CAMERA_STATE_CHANGED__STATE__RESET);

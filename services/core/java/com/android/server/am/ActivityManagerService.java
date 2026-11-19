@@ -18294,6 +18294,25 @@ public class ActivityManagerService extends IActivityManager.Stub
         }
 
         @Override
+        public void noteCameraStateChanged(int uid, boolean active) {
+            if (mCachedAppOptimizer == null) {
+                return;
+            }
+            if (active) {
+                mCachedAppOptimizer.noteCameraStart(uid);
+            } else {
+                mCachedAppOptimizer.noteCameraStop(uid);
+            }
+        }
+
+        @Override
+        public void noteCameraReset() {
+            if (mCachedAppOptimizer != null) {
+                mCachedAppOptimizer.noteCameraReset();
+            }
+        }
+
+        @Override
         public void setBooting(boolean booting) {
             mBooting = booting;
         }
@@ -20459,7 +20478,10 @@ public class ActivityManagerService extends IActivityManager.Stub
                 }
             }
 
-            if (freezePolicy) {
+            final boolean effectiveFreezePolicy = freezePolicy
+                    && (mCachedAppOptimizer == null
+                            || !mCachedAppOptimizer.hasActiveCamera(app.uid));
+            if (effectiveFreezePolicy) {
                 if (!com.android.server.notification.Flags.allowFreezingIdleNls()
                         && newOomAdj < CACHED_APP_MIN_ADJ) {
                     Slog.wtfStack(TAG, "Unexpected non-cached process may get frozen soon: "
@@ -21658,6 +21680,27 @@ public class ActivityManagerService extends IActivityManager.Stub
             }
         }
         return false;
+    }
+
+    void onCameraStateChanged(int uid) {
+        if (mCachedAppOptimizer == null || !mCachedAppOptimizer.useFreezer()
+                || mProcessList == null || mOomAdjuster == null) {
+            return;
+        }
+        synchronized (mGlobalLock) {
+            synchronized (mProcLock) {
+                mProcessList.forEachLruProcessesLOSP(false, proc -> {
+                    if (proc.uid == uid && !proc.isKilledByAm() && proc.getPid() > 0) {
+                        mOomAdjuster.updateAppFreezeStateLSP(
+                                proc,
+                                ActivityManagerInternal.OOM_ADJ_REASON_NONE,
+                                false,
+                                proc.getCurAdj(),
+                                proc.getCurAdj());
+                    }
+                });
+            }
+        }
     }
 
     private boolean isCameraProcessLocked(ProcessRecord record) {

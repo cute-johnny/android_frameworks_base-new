@@ -99,6 +99,7 @@ import android.util.IntArray;
 import android.util.Pair;
 import android.util.Slog;
 import android.util.SparseArray;
+import android.util.SparseIntArray;
 
 import com.android.internal.annotations.GuardedBy;
 import com.android.internal.annotations.Keep;
@@ -455,6 +456,10 @@ public class CachedAppOptimizer {
     private final ActivityManagerGlobalLock mProcLock;
 
     public final Object mFreezerLock = new Object();
+
+    private final Object mCameraLock = new Object();
+    @GuardedBy("mCameraLock")
+    private final SparseIntArray mActiveCameraUids = new SparseIntArray();
 
     private final OnPropertiesChangedListener mOnFlagsChangedListener =
             new OnPropertiesChangedListener() {
@@ -1761,6 +1766,72 @@ public class CachedAppOptimizer {
         }
     }
 
+    void noteCameraStart(int uid) {
+        if (uid < 0) {
+            return;
+        }
+        final boolean becameActive;
+        synchronized (mCameraLock) {
+            final int count = mActiveCameraUids.get(uid, 0);
+            mActiveCameraUids.put(uid, count + 1);
+            becameActive = count == 0;
+        }
+        if (becameActive && mUseFreezer && mAm != null && mAm.mHandler != null) {
+            mAm.mHandler.post(() -> mAm.onCameraStateChanged(uid));
+        }
+    }
+
+    void noteCameraStop(int uid) {
+        if (uid < 0) {
+            return;
+        }
+        final boolean becameIdle;
+        synchronized (mCameraLock) {
+            final int count = mActiveCameraUids.get(uid, 0);
+            if (count <= 0) {
+                return;
+            }
+            if (count == 1) {
+                mActiveCameraUids.delete(uid);
+                becameIdle = true;
+            } else {
+                mActiveCameraUids.put(uid, count - 1);
+                becameIdle = false;
+            }
+        }
+        if (becameIdle && mUseFreezer && mAm != null && mAm.mHandler != null) {
+            mAm.mHandler.post(() -> mAm.onCameraStateChanged(uid));
+        }
+    }
+
+    void noteCameraReset() {
+        final int[] clearedUids;
+        synchronized (mCameraLock) {
+            final int size = mActiveCameraUids.size();
+            if (size == 0) {
+                return;
+            }
+            clearedUids = new int[size];
+            for (int i = 0; i < size; i++) {
+                clearedUids[i] = mActiveCameraUids.keyAt(i);
+            }
+            mActiveCameraUids.clear();
+        }
+        if (mUseFreezer && mAm != null && mAm.mHandler != null) {
+            mAm.mHandler.post(() -> {
+                for (int uid : clearedUids) {
+                    mAm.onCameraStateChanged(uid);
+                }
+            });
+        }
+    }
+
+    boolean hasActiveCamera(int uid) {
+        synchronized (mCameraLock) {
+            return mActiveCameraUids.get(uid, 0) > 0;
+        }
+    }
+
     private IMmd getMmd() {
         if (mMmd == null) {
             IBinder b = ServiceManager.getService(MMD_SERVICE_NAME);
@@ -2544,6 +2615,14 @@ public class CachedAppOptimizer {
                     Slog.d(TAG_AM, "Skipping freeze for process " + pid
                             + " " + name + " curAdj = " + proc.getCurAdj()
                             + "(override)");
+                    return;
+                }
+
+                if (hasActiveCamera(proc.uid)) {
+                    if (DEBUG_FREEZER) {
+                        Slog.d(TAG_AM, "Skipping freeze for process " + pid
+                                + " " + name + " (active camera)");
+                    }
                     return;
                 }
 

@@ -24,12 +24,15 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.hardware.display.DisplayManager;
 import android.os.Debug;
 import android.os.Handler;
+import android.os.PowerManager;
 import android.os.SystemClock;
 import android.os.SystemProperties;
 import android.os.UserHandle;
 import android.util.Slog;
+import android.view.Display;
 
 import com.android.internal.os.BackgroundThread;
 
@@ -88,11 +91,14 @@ final class AppPreloader {
         mMinAvailKb = SystemProperties.getLong(PROP_MIN_AVAIL_MB, 1536) * 1024;
         mHandler.post(() -> {
             final IntentFilter filter = new IntentFilter(Intent.ACTION_SCREEN_ON);
+            filter.addAction(Intent.ACTION_SCREEN_OFF);
             mContext.registerReceiver(new BroadcastReceiver() {
                 @Override
                 public void onReceive(Context context, Intent intent) {
                     mHandler.removeCallbacks(mPreload);
-                    mHandler.postDelayed(mPreload, DELAY_MS);
+                    if (Intent.ACTION_SCREEN_ON.equals(intent.getAction())) {
+                        mHandler.postDelayed(mPreload, DELAY_MS);
+                    }
                 }
             }, filter, null, mHandler);
             Slog.i(TAG, "enabled for " + mComponent.flattenToShortString());
@@ -103,6 +109,13 @@ final class AppPreloader {
 
     private void maybePreload() {
         if (!SystemProperties.getBoolean(PROP_ENABLED, true)) return;
+        final PowerManager powerMgr = mContext.getSystemService(PowerManager.class);
+        if (powerMgr == null || !powerMgr.isInteractive() || powerMgr.isPowerSaveMode()) return;
+        final DisplayManager dm = mContext.getSystemService(DisplayManager.class);
+        if (dm != null) {
+            final Display display = dm.getDisplay(Display.DEFAULT_DISPLAY);
+            if (display == null || display.getState() != Display.STATE_ON) return;
+        }
         final long now = SystemClock.elapsedRealtime();
         if (now - mLastAttempt < MIN_INTERVAL_MS) return;
 

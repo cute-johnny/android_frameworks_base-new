@@ -1476,4 +1476,18 @@ public abstract class ActivityManagerInternal {
      * @param clientUid the UID that has a bound client
      */
     public abstract boolean hasServiceBindingOrProviderUse(int uid, int clientUid);
+
+    /**
+     * Notifies ActivityManager that a UID has started or stopped holding an active camera device.
+     *
+     * @hide
+     */
+    public void noteCameraStateChanged(int uid, boolean active) {}
+
+    /**
+     * Notifies ActivityManager that all tracked camera device states were reset.
+     *
+     * @hide
+     */
+    public void noteCameraReset() {}
 }
