@@ -1261,7 +1261,7 @@ public abstract class OomAdjuster {
             } else if (!app.isKilledByAm() && app.isProcessRunning() && curAdj >= UNKNOWN_ADJ) {
                 // If we haven't yet assigned the final cached adj to the process, do that now.
                 final ProcessServiceRecordInternal psr = app.getServices();
-                if (protectFrequent && mFrequentApps.isProtected(app)) {
+                if (mFrequentApps.isProtected(app)) {
                     app.setCurRawAdj(CACHED_APP_MIN_ADJ);
                     app.setCurAdj(applyBindAboveClientToAdj(psr.hasBindAboveClient(),
                             CACHED_APP_MIN_ADJ));
@@ -2636,11 +2636,14 @@ public abstract class OomAdjuster {
         };
     }
 
+    @GuardedBy("mServiceLock")
     private void maybeUpdateLastTopTime(ProcessRecordInternal state, long nowUptime) {
         if (state.getSetProcState() <= PROCESS_STATE_TOP
                 && state.getCurProcState() > PROCESS_STATE_TOP) {
             state.setLastTopTime(nowUptime);
-            mFrequentApps.noteLeftTop(state);
+            if (state.getMaxAdj() >= FOREGROUND_APP_ADJ && !isHomeProcess(state)) {
+                mFrequentApps.noteLeftTop(state);
+            }
         }
     }
 
